@@ -1,0 +1,123 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+*.manifest
+*.spec
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Environment
+.env
+.env.local
+.env.*.local
+.venv
+venv/
+ENV/
+env/
+
+# uv
+.uv/
+uv.lock
+
+# IDE - Visual Studio Code
+.vscode/
+*.code-workspace
+.history/
+
+# IDE - JetBrains (PyCharm, IntelliJ, etc.)
+.idea/
+*.iml
+*.iws
+*.ipr
+out/
+
+# IDE - Vim/Neovim
+*.swp
+*.swo
+*~
+.netrwhist
+
+# IDE - Emacs
+*~
+\#*\#
+.\#*
+
+# IDE - Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# IDE - Eclipse
+.project
+.classpath
+.settings/
+
+# IDE - Atom
+.atom/
+
+# IDE - NetBeans
+nbproject/
+
+# IDE - Xcode
+*.xcworkspace
+*.xcodeproj/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+.Spotlight-V100
+.Trashes
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+*.stackdump
+[Dd]esktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# Linux
+*~
+.nfs*
+.directory
+.Trash-*
+
+# Logs
+*.log
+logs/
+log/
+
+# Coverage/Testing
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+
+# Build artifacts
+*.egg-info/
+dist/
+build/
+wheels/
+
+# Misc
+*.bak
+*.tmp
+*.temp
+*.orig

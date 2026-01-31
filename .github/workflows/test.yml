@@ -1,0 +1,77 @@
+name: Test
+
+on:
+  push:
+    branches:
+      - '**'
+  pull_request:
+    branches:
+      - '**'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.14']
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v5
+      with:
+        enable-cache: true
+        cache-dependency-glob: "**/pyproject.toml"
+
+    - name: Install dependencies
+      run: |
+        uv sync --dev
+
+    - name: Run tests with coverage
+      run: |
+        uv run pytest --cov=new_seasons_reminder --cov-report=xml --cov-report=term
+
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v5
+      with:
+        files: ./coverage.xml
+        flags: unittests
+        name: codecov-umbrella
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.14'
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v5
+      with:
+        enable-cache: true
+        cache-dependency-glob: "**/pyproject.toml"
+
+    - name: Install dependencies
+      run: |
+        uv sync --dev
+
+    - name: Check code formatting with ruff
+      run: |
+        uv run ruff format --check .
+
+    - name: Lint with ruff
+      run: |
+        uv run ruff check .
+
+    - name: Type check with mypy
+      run: |
+        uv run mypy src/new_seasons_reminder
