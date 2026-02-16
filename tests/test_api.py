@@ -1,10 +1,9 @@
 """Tests for Tautulli API integration and data fetching functions."""
 
-import os
-import sys
-
 import importlib
 import json
+import os
+import sys
 from email.message import Message
 from unittest.mock import MagicMock, patch
 from urllib.error import HTTPError, URLError

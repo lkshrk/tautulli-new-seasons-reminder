@@ -1,6 +1,6 @@
 # Tautulli New Seasons Reminder
 
-[![Tests](https://github.com/lkshrk/tautulli-new-seasons-reminder/actions/workflows/test.yml/badge.svg)](https://github.com/lkshrk/tautulli-new-seasons-reminder/actions/workflows/test.yml)
+[![CI](https://github.com/lkshrk/tautulli-new-seasons-reminder/actions/workflows/test.yml/badge.svg)](https://github.com/lkshrk/tautulli-new-seasons-reminder/actions/workflows/test.yml)
 [![Release](https://github.com/lkshrk/tautulli-new-seasons-reminder/actions/workflows/release.yml/badge.svg)](https://github.com/lkshrk/tautulli-new-seasons-reminder/actions/workflows/release.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
