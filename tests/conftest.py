@@ -26,7 +26,6 @@ def sample_seasons():
             "added_at": "2026-01-28T10:30:00",
             "episode_count": 13,
             "rating_key": "12345",
-            "cover_url": "http://localhost:32400/library/metadata/12345/thumb/1234567890",
         },
         {
             "show": "The Office",
@@ -35,7 +34,6 @@ def sample_seasons():
             "added_at": "2026-01-29T14:20:00",
             "episode_count": 22,
             "rating_key": "67890",
-            "cover_url": None,
         },
     ]
 
@@ -57,7 +55,6 @@ def signal_config():
         "signal_number": "+1234567890",
         "signal_recipients": "+0987654321,+1122334455",
         "signal_text_mode": "styled",
-        "signal_include_covers": False,
     }
 
 
@@ -124,7 +121,6 @@ def mock_show_metadata():
         "rating_key": "11111",
         "title": "Breaking Bad",
         "added_at": str(int((datetime.now() - timedelta(days=365)).timestamp())),
-        "thumb": "/library/metadata/11111/thumb/1234567890",
     }
 
 
@@ -163,12 +159,6 @@ def mock_episodes_data():
     ]
 
 
-@pytest.fixture
-def mock_image_data():
-    """Mock image data for base64 encoding tests."""
-    return b"fake_image_data_for_testing"
-
-
 # Environment setup fixtures
 
 
@@ -179,8 +169,6 @@ def set_env_vars():
         "TAUTULLI_URL": "http://localhost:8181",
         "TAUTULLI_APIKEY": "test-api-key",
         "WEBHOOK_URL": "http://example.com/webhook",
-        "PLEX_URL": "http://localhost:32400",
-        "PLEX_TOKEN": "test-plex-token",
     }
 
     # Store original values

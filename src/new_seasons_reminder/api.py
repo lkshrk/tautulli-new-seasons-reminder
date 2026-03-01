@@ -1,15 +1,22 @@
-"""Tautulli API functions for fetching metadata and cover images."""
+"""Tautulli API functions for fetching metadata."""
 
-import base64
-import json
 import logging
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode, urljoin
-from urllib.request import urlopen
+from urllib.parse import urljoin
+
+from .http import HTTPClient
 
 # Module-level logger
 logger = logging.getLogger(__name__)
+
+# Shared HTTP client instance
+_http_client = HTTPClient()
+
+
+def set_http_client(http_client: HTTPClient) -> None:
+    global _http_client
+    _http_client = http_client
 
 
 def make_tautulli_request(
@@ -40,35 +47,28 @@ def make_tautulli_request(
     if params:
         base_params.update(params)
 
-    url = urljoin(tautulli_url.rstrip("/") + "/", "api/v2") + "?" + urlencode(base_params)
-    safe_params = base_params.copy()
-    if "apikey" in safe_params:
-        safe_params["apikey"] = "***"
-    safe_url = urljoin(tautulli_url.rstrip("/") + "/", "api/v2") + "?" + urlencode(safe_params)
+    url = urljoin(tautulli_url.rstrip("/") + "/", "api/v2")
 
     try:
-        logger.debug(f"Making request to Tautulli API: {cmd}")
-        logger.debug(f"Tautulli API URL: {safe_url}")
-        with urlopen(url, timeout=30) as response:
-            raw_response = response.read()
-            logger.debug(
-                "Tautulli API raw response type=%s size=%s",
-                type(raw_response).__name__,
-                len(raw_response),
-            )
-            data = json.loads(raw_response.decode("utf-8"))
-            if data.get("response", {}).get("result") == "success":
-                return data.get("response", {}).get("data")
-            else:
-                logger.error(f"Tautulli API error: {data}")
-                return None
+        logger.debug("Making request to Tautulli API: %s", cmd)
+        data = _http_client.get_json(url, params=base_params)
+        if isinstance(data, dict) and data.get("response", {}).get("result") == "success":
+            return data.get("response", {}).get("data")
+        if cmd == "get_recently_added" and isinstance(data, dict) and "recently_added" in data:
+            return data
+        # Handle empty dict response for get_recently_added - return empty list
+        if data == {} and cmd == "get_recently_added":
+            return []
+        else:
+            logger.error("Tautulli API error: %s", data)
+            return None
     except HTTPError as e:
         logger.error("HTTP Error on cmd=%s params=%s: %s - %s", cmd, params, e.code, e.reason)
         return None
     except URLError as e:
         logger.error("URL Error on cmd=%s params=%s: %s", cmd, params, e.reason)
         return None
-    except json.JSONDecodeError as e:
+    except ValueError as e:
         logger.error("JSON Decode Error on cmd=%s: %s", cmd, e)
         return None
     except Exception as e:
@@ -81,7 +81,7 @@ def get_recently_added(
     count: int = 100,
     tautulli_url: str = "",
     tautulli_apikey: str = "",
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """Get recently added items from Tautulli.
 
     Args:
@@ -120,6 +120,7 @@ def get_recently_added(
                 item.get("media_type"),
             )
         return items
+
     return []
 
 
@@ -127,7 +128,7 @@ def get_metadata(
     rating_key: str,
     tautulli_url: str = "",
     tautulli_apikey: str = "",
-) -> dict | None:
+) -> dict[str, Any] | None:
     """Get metadata for a specific item.
 
     Args:
@@ -150,11 +151,26 @@ def get_metadata(
     return result if isinstance(result, dict) else None
 
 
+def get_libraries(
+    tautulli_url: str = "",
+    tautulli_apikey: str = "",
+) -> list[dict[str, Any]]:
+    data = make_tautulli_request(
+        "get_libraries",
+        tautulli_url=tautulli_url,
+        tautulli_apikey=tautulli_apikey,
+    )
+    if isinstance(data, list):
+        return data
+    return []
+
+
 def get_children_metadata(
     rating_key: str,
     tautulli_url: str = "",
     tautulli_apikey: str = "",
-) -> list[dict]:
+    media_type: str = "season",
+) -> list[dict[str, Any]]:
     """Get children (episodes/seasons) of an item.
 
     Args:
@@ -166,6 +182,7 @@ def get_children_metadata(
         List of child items with rating keys.
     """
     params = {"rating_key": rating_key}
+    params["media_type"] = media_type
     data = make_tautulli_request(
         "get_children_metadata",
         params,
@@ -184,95 +201,5 @@ def get_children_metadata(
         filtered_children = [child for child in children if child.get("rating_key")]
         logger.debug("get_children_metadata extracted %s children", len(filtered_children))
         return filtered_children
+
     return []
-
-
-def get_cover_url(
-    thumb_path: str,
-    plex_url: str = "",
-    plex_token: str = "",
-) -> str | None:
-    """Build full cover URL from thumb path using Plex URL and token.
-
-    Args:
-        thumb_path: The thumb path from metadata.
-        plex_url: URL to the Plex server.
-        plex_token: Plex authentication token.
-
-    Returns:
-        Full cover URL with authentication token, or None if not available.
-    """
-    if not thumb_path:
-        return None
-
-    if not plex_url or not plex_token:
-        logger.debug("plex_url or plex_token not set, cannot build cover URL")
-        return None
-
-    full_url = urljoin(plex_url.rstrip("/") + "/", thumb_path.lstrip("/"))
-    separator = "&" if "?" in full_url else "?"
-    cover_url = f"{full_url}{separator}X-Plex-Token={plex_token}"
-    logger.debug("get_cover_url thumb_path=%s url=%s", thumb_path, cover_url)
-    return cover_url
-
-
-def get_show_cover(
-    rating_key: str,
-    plex_url: str = "",
-    plex_token: str = "",
-    tautulli_url: str = "",
-    tautulli_apikey: str = "",
-) -> str | None:
-    """Get cover URL for a show.
-
-    Args:
-        rating_key: The rating key of the show.
-        plex_url: URL to the Plex server.
-        plex_token: Plex authentication token.
-        tautulli_url: URL to the Tautulli instance.
-        tautulli_apikey: Tautulli API key.
-
-    Returns:
-        Cover URL if available, None otherwise.
-    """
-    metadata = get_metadata(
-        rating_key,
-        tautulli_url=tautulli_url,
-        tautulli_apikey=tautulli_apikey,
-    )
-    if not metadata:
-        logger.debug("get_show_cover rating_key=%s found=False", rating_key)
-        return None
-
-    thumb = metadata.get("thumb") or metadata.get("art") or metadata.get("poster_thumb")
-    if thumb:
-        cover_url = get_cover_url(thumb, plex_url=plex_url, plex_token=plex_token)
-        logger.debug("get_show_cover rating_key=%s found=%s", rating_key, bool(cover_url))
-        return cover_url
-    logger.debug("get_show_cover rating_key=%s found=False", rating_key)
-    return None
-
-
-def download_cover_as_base64(cover_url: str) -> str | None:
-    """Download cover image and return as base64 encoded string.
-
-    Args:
-        cover_url: URL to the cover image.
-
-    Returns:
-        Base64 encoded image data, or None if download fails.
-    """
-    if not cover_url:
-        return None
-
-    try:
-        logger.debug("download_cover_as_base64 url=%s", cover_url)
-        with urlopen(cover_url, timeout=30) as response:
-            image_data = response.read()
-            encoded = base64.b64encode(image_data).decode("utf-8")
-            logger.debug("download_cover_as_base64 success=True")
-            return encoded
-    except Exception as e:
-        logger.debug("download_cover_as_base64 success=False")
-        logger.warning(f"Failed to download cover: {e}")
-        return None

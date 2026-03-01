@@ -1,10 +1,8 @@
 """Signal CLI webhook provider."""
 
-import base64
 import logging
 from datetime import datetime
 from typing import Any
-from urllib.request import urlopen
 
 from .base import WebhookProvider
 
@@ -40,27 +38,6 @@ class SignalCliProvider(WebhookProvider):
         logger.debug("Parsed %d Signal recipients", len(recipients))
         return recipients
 
-    def _get_covers_as_base64(self, seasons: list[dict[str, Any]]) -> list[str]:
-        """Download and encode covers as base64."""
-        base64_covers = []
-        for season in seasons:
-            cover_url = season.get("cover_url")
-            if not cover_url:
-                continue
-            try:
-                logger.debug(
-                    "Downloading cover for %s from %s",
-                    season.get("show"),
-                    cover_url,
-                )
-                with urlopen(cover_url, timeout=30) as response:
-                    image_data = response.read()
-                    base64_covers.append(base64.b64encode(image_data).decode("utf-8"))
-            except Exception as e:
-                logger.warning("Failed to download cover for %s: %s", season["show"], e)
-        logger.info("Downloaded %d cover(s) for Signal payload", len(base64_covers))
-        return base64_covers
-
     def format_message(self, seasons: list[dict[str, Any]]) -> str:
         """Format message with Signal text styling (bold, italic)."""
         count = len(seasons)
@@ -89,27 +66,28 @@ class SignalCliProvider(WebhookProvider):
         )
         return message
 
+    def format_subject(self, seasons: list[dict[str, Any]]) -> str:
+        count = len(seasons)
+        period = self.config.get("lookback_days", 7)
+        season_plural = "s" if count != 1 else ""
+        return f"{count} new season{season_plural} completed in the last {period} days"
+
     def build_payload(self, seasons: list[dict[str, Any]]) -> dict[str, Any]:
         """Build signal-cli-rest-api payload."""
         message = self.format_message(seasons)
+        subject = self.format_subject(seasons)
         recipients = self._parse_recipients()
 
         payload = {
+            "subject": subject,
             "message": message,
-            "number": self.config["signal_number"],
-            "recipients": recipients,
-            "text_mode": self.config.get("signal_text_mode", "styled"),
+            "sender": self.config["signal_number"],
+            "recipient": recipients[0] if recipients else "",
         }
 
-        if self.config.get("signal_include_covers", False) and seasons:
-            base64_covers = self._get_covers_as_base64(seasons)
-            if base64_covers:
-                payload["base64_attachments"] = base64_covers
-
         logger.info(
-            "Signal payload summary: recipients=%d, attachments=%s, message_length=%d",
+            "Signal payload summary: recipients=%d, message_length=%d",
             len(recipients),
-            "base64_attachments" in payload,
             len(message),
         )
 

@@ -1,444 +1,290 @@
-"""Tests for Tautulli API integration and data fetching functions."""
+"""Tests for Tautulli API functions."""
 
-import importlib
-import json
 import os
 import sys
-from email.message import Message
-from unittest.mock import MagicMock, patch
-from urllib.error import HTTPError, URLError
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
 
-api = importlib.import_module("new_seasons_reminder.api")
-get_cover_url = api.get_cover_url
-get_show_cover = api.get_show_cover
+import new_seasons_reminder.api as api
 
 
 class TestMakeTautulliRequest:
-    """Tests for the make_tautulli_request function."""
+    """Tests for the API helper functions."""
 
-    @patch("new_seasons_reminder.api.urlopen")
-    def test_successful_request(self, mock_urlopen):
+    @patch("new_seasons_reminder.http.HTTPClient.get_json")
+    def test_make_tautulli_request_success(self, mock_get_json):
         """Test successful API request."""
-        mock_response = MagicMock()
-        mock_response.read.return_value = json.dumps(
-            {"response": {"result": "success", "data": [{"test": "data"}]}}
-        ).encode("utf-8")
-        mock_urlopen.return_value.__enter__.return_value = mock_response
+        mock_get_json.return_value = {"response": {"result": "success", "data": {"test": "data"}}}
 
         result = api.make_tautulli_request(
             "get_recently_added",
             {"count": 10},
-            tautulli_url="http://localhost:8181",
-            tautulli_apikey="test-api-key",
+            "http://localhost:8181",
+            "test-api-key",
         )
 
-        assert result is not None
-        assert result[0]["test"] == "data"
+        assert result == {"test": "data"}
 
-    @patch("new_seasons_reminder.api.urlopen")
-    def test_api_error_response(self, mock_urlopen):
-        """Test handling of API error response."""
-        mock_response = MagicMock()
-        mock_response.read.return_value = json.dumps(
-            {"response": {"result": "error", "message": "Invalid command"}}
-        ).encode("utf-8")
-        mock_urlopen.return_value.__enter__.return_value = mock_response
+    @patch("new_seasons_reminder.http.HTTPClient.get_json")
+    def test_make_tautulli_request_unauthorized(self, mock_get_json):
+        """Test unauthorized response."""
+        mock_get_json.return_value = {"response": {"result": "error", "error": "Unauthorized"}}
 
         result = api.make_tautulli_request(
-            "invalid_cmd",
-            tautulli_url="http://localhost:8181",
-            tautulli_apikey="test-api-key",
+            "get_metadata",
+            {},
+            "http://localhost:8181",
+            "test-api-key",
         )
 
         assert result is None
 
-    def test_missing_config(self):
-        """Test handling when Tautulli config is missing."""
+    @patch("new_seasons_reminder.http.HTTPClient.get_json")
+    def test_make_tautulli_request_missing_config(self, mock_get_json):
+        """Test missing configuration."""
+        mock_get_json.return_value = None
+
         result = api.make_tautulli_request(
-            "get_recently_added",
-            tautulli_url="",
-            tautulli_apikey="",
+            "get_metadata",
+            {},
+            "",
+            "test-api-key",
         )
+
         assert result is None
 
-    @patch("new_seasons_reminder.api.urlopen")
-    def test_http_error(self, mock_urlopen):
-        """Test handling of HTTP error."""
-        mock_urlopen.side_effect = HTTPError(
-            url="http://test.com",
-            code=404,
-            msg="Not Found",
-            hdrs=Message(),
-            fp=None,
-        )
+    @patch("new_seasons_reminder.http.HTTPClient.get_json")
+    def test_make_tautulli_request_http_error(self, mock_get_json):
+        """Test HTTP error."""
+        # Mock get_json to raise Exception
+        mock_get_json.side_effect = Exception("HTTP error occurred")
 
         result = api.make_tautulli_request(
             "get_recently_added",
-            tautulli_url="http://localhost:8181",
-            tautulli_apikey="test-api-key",
+            {"count": 10},
+            "http://localhost:8181",
+            "test-api-key",
         )
 
         assert result is None
 
-    @patch("new_seasons_reminder.api.urlopen")
-    def test_url_error(self, mock_urlopen):
-        """Test handling of URL error (connection failure)."""
-        mock_urlopen.side_effect = URLError("Connection refused")
+    @patch("new_seasons_reminder.http.HTTPClient.get_json")
+    def test_make_tautulli_request_url_error(self, mock_get_json):
+        """Test URL error."""
+        # Mock get_json to raise Exception
+        mock_get_json.side_effect = Exception("URL error occurred")
 
         result = api.make_tautulli_request(
             "get_recently_added",
-            tautulli_url="http://localhost:8181",
-            tautulli_apikey="test-api-key",
+            {"count": 10},
+            "http://localhost:8181",
+            "test-api-key",
         )
 
         assert result is None
 
-    @patch("new_seasons_reminder.api.urlopen")
-    def test_json_decode_error(self, mock_urlopen):
-        """Test handling of invalid JSON response."""
-        mock_response = MagicMock()
-        mock_response.read.return_value = b"invalid json"
-        mock_urlopen.return_value.__enter__.return_value = mock_response
+    @patch("new_seasons_reminder.http.HTTPClient.get_json")
+    def test_make_tautulli_request_invalid_json(self, mock_get_json):
+        """Test invalid JSON response."""
+        mock_get_json.return_value = "not json"
 
         result = api.make_tautulli_request(
             "get_recently_added",
-            tautulli_url="http://localhost:8181",
-            tautulli_apikey="test-api-key",
+            {"count": 10},
+            "http://localhost:8181",
+            "test-api-key",
         )
 
         assert result is None
 
-    @patch("new_seasons_reminder.api.urlopen")
-    def test_unexpected_exception(self, mock_urlopen):
-        """Test handling of unexpected exceptions."""
-        mock_urlopen.side_effect = Exception("Unexpected error")
+    @patch("new_seasons_reminder.http.HTTPClient.get_json")
+    def test_make_tautulli_request_empty_response(self, mock_get_json):
+        """Test empty response."""
+        mock_get_json.return_value = {}
 
         result = api.make_tautulli_request(
             "get_recently_added",
-            tautulli_url="http://localhost:8181",
-            tautulli_apikey="test-api-key",
-        )
-
-        assert result is None
-
-
-class TestGetRecentlyAdded:
-    """Tests for get_recently_added function."""
-
-    @patch("new_seasons_reminder.api.make_tautulli_request")
-    def test_get_recently_added_success(self, mock_request, mock_tautulli_response):
-        """Test successful fetch of recently added items."""
-        mock_request.return_value = {"recently_added": mock_tautulli_response["response"]["data"]}
-
-        result = api.get_recently_added(
-            media_type="season",
-            count=10,
-            tautulli_url="http://localhost:8181",
-            tautulli_apikey="test-api-key",
-        )
-
-        assert len(result) == 2
-        assert result[0]["media_type"] == "season"
-
-    @patch("new_seasons_reminder.api.make_tautulli_request")
-    def test_get_recently_added_list_response(self, mock_request, mock_tautulli_response):
-        """Test backwards compatibility for list response."""
-        mock_request.return_value = mock_tautulli_response["response"]["data"]
-
-        result = api.get_recently_added(
-            media_type="season",
-            count=10,
-            tautulli_url="http://localhost:8181",
-            tautulli_apikey="test-api-key",
-        )
-
-        assert len(result) == 2
-        assert result[1]["media_type"] == "season"
-
-    @patch("new_seasons_reminder.api.make_tautulli_request")
-    def test_get_recently_added_empty_response(self, mock_request):
-        """Test handling of empty response."""
-        mock_request.return_value = []
-
-        result = api.get_recently_added(
-            tautulli_url="http://localhost:8181",
-            tautulli_apikey="test-api-key",
+            {"count": 10},
+            "http://localhost:8181",
+            "test-api-key",
         )
 
         assert result == []
 
-    @patch("new_seasons_reminder.api.make_tautulli_request")
-    def test_get_recently_added_api_failure(self, mock_request):
-        """Test handling when API call fails."""
-        mock_request.return_value = None
+    @patch("new_seasons_reminder.http.HTTPClient.get_json")
+    def test_make_tautulli_request_raw_recently_added_dict(self, mock_get_json):
+        mock_get_json.return_value = {"recently_added": [{"rating_key": "season_1"}]}
 
-        result = api.get_recently_added(
-            tautulli_url="http://localhost:8181",
-            tautulli_apikey="test-api-key",
+        result = api.make_tautulli_request(
+            "get_recently_added",
+            {"count": 10},
+            "http://localhost:8181",
+            "test-api-key",
         )
 
-        assert result == []
+        assert isinstance(result, dict)
+        assert result["recently_added"][0]["rating_key"] == "season_1"
 
-    @patch("new_seasons_reminder.api.make_tautulli_request")
-    def test_get_recently_added_non_list_response(self, mock_request):
-        """Test handling when response is a dict wrapper."""
-        mock_request.return_value = {
-            "recently_added": [{"rating_key": "123", "title": "Season 1", "media_type": "season"}]
+    @patch("new_seasons_reminder.http.HTTPClient.get_json")
+    def test_get_recently_added_success(self, mock_get_json):
+        """Test get_recently_added success."""
+        recent_data = [
+            {
+                "rating_key": "season_1",
+                "title": "Season 1",
+                "media_type": "season",
+                "added_at": "1234567890",
+            },
+            {
+                "rating_key": "season_2",
+                "title": "Season 2",
+                "media_type": "season",
+                "added_at": "1234567891",
+            },
+        ]
+
+        mock_get_json.return_value = {
+            "response": {"result": "success", "data": {"recently_added": recent_data}}
         }
 
-        result = api.get_recently_added(
+        result = api.get_recently_added("show", 10, "http://localhost:8181", "test-api-key")
+
+        assert len(result) == 2
+        assert result[0]["rating_key"] == "season_1"
+
+    @patch("new_seasons_reminder.http.HTTPClient.get_json")
+    def test_get_recently_added_no_items(self, mock_get_json):
+        """Test get_recently_added with no items."""
+        mock_get_json.return_value = {
+            "response": {"result": "success", "data": {"recently_added": []}}
+        }
+
+        result = api.get_recently_added("show", 10, "http://localhost:8181", "test-api-key")
+
+        assert result == []
+
+    @patch("new_seasons_reminder.http.HTTPClient.get_json")
+    def test_get_recently_added_missing_response(self, mock_get_json):
+        """Test get_recently_added with missing response."""
+        mock_get_json.return_value = {"response": {"result": "success"}}
+
+        result = api.get_recently_added("show", 10, "http://localhost:8181", "test-api-key")
+
+        assert result == []
+
+    @patch("new_seasons_reminder.http.HTTPClient.get_json")
+    def test_get_metadata_success(self, mock_get_json):
+        """Test get_metadata success."""
+        metadata_data = {
+            "rating_key": "show_1",
+            "title": "Test Show",
+            "media_type": "show",
+            "added_at": "1234567890",
+        }
+
+        mock_get_json.return_value = {"response": {"result": "success", "data": metadata_data}}
+
+        result = api.get_metadata("show_1", "http://localhost:8181", "test-api-key")
+
+        assert result is not None
+        assert result["rating_key"] == "show_1"
+
+    @patch("new_seasons_reminder.http.HTTPClient.get_json")
+    def test_get_metadata_missing_response(self, mock_get_json):
+        """Test get_metadata with missing response."""
+        mock_get_json.return_value = {"response": {"result": "success"}}
+
+        result = api.get_metadata("show_1", "http://localhost:8181", "test-api-key")
+
+        assert result is None
+
+    @patch("new_seasons_reminder.http.HTTPClient.get_json")
+    def test_get_children_metadata_success(self, mock_get_json):
+        """Test get_children_metadata success."""
+        children_data = [
+            {
+                "rating_key": "episode_1",
+                "title": "Episode 1",
+                "media_type": "episode",
+            },
+            {
+                "rating_key": "episode_2",
+                "title": "Episode 2",
+                "media_type": "episode",
+            },
+        ]
+
+        mock_get_json.return_value = {
+            "response": {"result": "success", "data": {"children_list": children_data}}
+        }
+
+        result = api.get_children_metadata("season_1", "http://localhost:8181", "test-api-key")
+
+        assert len(result) == 2
+        assert result[0]["rating_key"] == "episode_1"
+        params = mock_get_json.call_args.kwargs["params"]
+        assert params["cmd"] == "get_children_metadata"
+        assert params["rating_key"] == "season_1"
+        assert params["media_type"] == "season"
+
+    @patch("new_seasons_reminder.http.HTTPClient.get_json")
+    def test_get_children_metadata_custom_media_type(self, mock_get_json):
+        mock_get_json.return_value = {
+            "response": {"result": "success", "data": {"children_list": []}}
+        }
+
+        result = api.get_children_metadata(
+            "show_1",
+            media_type="show",
             tautulli_url="http://localhost:8181",
             tautulli_apikey="test-api-key",
         )
+
+        assert result == []
+        params = mock_get_json.call_args.kwargs["params"]
+        assert params["media_type"] == "show"
+
+    @patch("new_seasons_reminder.http.HTTPClient.get_json")
+    def test_get_children_metadata_no_items(self, mock_get_json):
+        """Test get_children_metadata with no items."""
+        mock_get_json.return_value = {
+            "response": {"result": "success", "data": {"children_list": []}}
+        }
+
+        result = api.get_children_metadata("season_1", "http://localhost:8181", "test-api-key")
+
+        assert result == []
+
+    @patch("new_seasons_reminder.http.HTTPClient.get_json")
+    def test_get_children_metadata_missing_response(self, mock_get_json):
+        """Test get_children_metadata with missing response."""
+        mock_get_json.return_value = {"response": {"result": "success"}}
+
+        result = api.get_children_metadata("season_1", "http://localhost:8181", "test-api-key")
+
+        assert result == []
+
+    @patch("new_seasons_reminder.http.HTTPClient.get_json")
+    def test_get_libraries_success(self, mock_get_json):
+        mock_get_json.return_value = {
+            "response": {
+                "result": "success",
+                "data": [{"section_id": "1", "section_name": "TV Shows"}],
+            }
+        }
+
+        result = api.get_libraries("http://localhost:8181", "test-api-key")
 
         assert len(result) == 1
-        assert result[0]["rating_key"] == "123"
+        assert result[0]["section_id"] == "1"
 
-
-class TestGetMetadata:
-    """Tests for get_metadata function."""
-
-    @patch("new_seasons_reminder.api.make_tautulli_request")
-    def test_get_metadata_success(self, mock_request, mock_show_metadata):
-        """Test successful metadata fetch."""
-        mock_request.return_value = mock_show_metadata
-
-        result = api.get_metadata(
-            "11111",
-            tautulli_url="http://localhost:8181",
-            tautulli_apikey="test-api-key",
-        )
-
-        assert result is not None
-        assert result["title"] == "Breaking Bad"
-        assert result["thumb"] is not None
-
-    @patch("new_seasons_reminder.api.make_tautulli_request")
-    def test_get_metadata_failure(self, mock_request):
-        """Test handling when metadata fetch fails."""
-        mock_request.return_value = None
-
-        result = api.get_metadata(
-            "11111",
-            tautulli_url="http://localhost:8181",
-            tautulli_apikey="test-api-key",
-        )
-
-        assert result is None
-
-
-class TestGetChildrenMetadata:
-    """Tests for get_children_metadata function."""
-
-    @patch("new_seasons_reminder.api.make_tautulli_request")
-    def test_get_children_success(self, mock_request, mock_seasons_data):
-        """Test successful children metadata fetch."""
-        mock_request.return_value = {
-            "children_count": len(mock_seasons_data),
-            "children_list": mock_seasons_data,
+    @patch("new_seasons_reminder.http.HTTPClient.get_json")
+    def test_get_libraries_non_list_response(self, mock_get_json):
+        mock_get_json.return_value = {
+            "response": {"result": "success", "data": {"unexpected": True}}
         }
 
-        result = api.get_children_metadata(
-            "11111",
-            tautulli_url="http://localhost:8181",
-            tautulli_apikey="test-api-key",
-        )
-
-        assert len(result) == 3
-        assert all(child.get("rating_key") for child in result)
-
-    @patch("new_seasons_reminder.api.make_tautulli_request")
-    def test_get_children_list_response(self, mock_request, mock_seasons_data):
-        """Test backwards compatibility for list response."""
-        mock_request.return_value = mock_seasons_data
-
-        result = api.get_children_metadata(
-            "11111",
-            tautulli_url="http://localhost:8181",
-            tautulli_apikey="test-api-key",
-        )
-
-        assert len(result) == 3
-        assert all(child.get("rating_key") for child in result)
-
-    @patch("new_seasons_reminder.api.make_tautulli_request")
-    def test_get_children_empty_response(self, mock_request):
-        """Test handling of empty children response."""
-        mock_request.return_value = []
-
-        result = api.get_children_metadata(
-            "11111",
-            tautulli_url="http://localhost:8181",
-            tautulli_apikey="test-api-key",
-        )
+        result = api.get_libraries("http://localhost:8181", "test-api-key")
 
         assert result == []
-
-    @patch("new_seasons_reminder.api.make_tautulli_request")
-    def test_get_children_filters_missing_rating_key(self, mock_request):
-        """Test that children without rating_key are filtered out."""
-        mock_request.return_value = {
-            "children_count": 3,
-            "children_list": [
-                {"title": "Season 1", "rating_key": "123"},
-                {"title": "Season 2"},  # No rating_key
-                {"title": "Season 3", "rating_key": "456"},
-            ],
-        }
-
-        result = api.get_children_metadata(
-            "11111",
-            tautulli_url="http://localhost:8181",
-            tautulli_apikey="test-api-key",
-        )
-
-        assert len(result) == 2
-
-    @patch("new_seasons_reminder.api.make_tautulli_request")
-    def test_get_children_api_failure(self, mock_request):
-        """Test handling when API call fails."""
-        mock_request.return_value = None
-
-        result = api.get_children_metadata(
-            "11111",
-            tautulli_url="http://localhost:8181",
-            tautulli_apikey="test-api-key",
-        )
-
-        assert result == []
-
-
-class TestCoverUrlFunctions:
-    """Tests for cover URL building functions."""
-
-    def test_get_cover_url_with_absolute_path(self):
-        """Test cover URL building with absolute path."""
-        thumb_path = "/library/metadata/123/thumb/1234567890"
-        result = get_cover_url(
-            thumb_path,
-            plex_url="http://localhost:32400",
-            plex_token="test-plex-token",
-        )
-
-        assert result is not None
-        assert result.startswith("http://localhost:32400")
-        assert "/library/metadata/123/thumb/1234567890" in result
-        assert "X-Plex-Token=test-plex-token" in result
-
-    def test_get_cover_url_with_relative_path(self):
-        """Test cover URL building with relative path."""
-        thumb_path = "library/metadata/123/thumb/1234567890"
-        result = get_cover_url(
-            thumb_path,
-            plex_url="http://localhost:32400",
-            plex_token="test-plex-token",
-        )
-
-        assert result is not None
-        assert "/library/metadata/123/thumb/1234567890" in result
-
-    def test_get_cover_url_missing_plex_config(self):
-        """Test cover URL returns None when Plex config missing."""
-        result = get_cover_url(
-            "/path/to/thumb",
-            plex_url="",
-            plex_token="",
-        )
-        assert result is None
-
-    def test_get_cover_url_none_path(self):
-        """Test cover URL returns None when thumb_path is None."""
-        result = get_cover_url(
-            None,
-            plex_url="http://localhost:32400",
-            plex_token="test-plex-token",
-        )
-        assert result is None
-
-    @patch("new_seasons_reminder.api.get_metadata")
-    def test_get_show_cover_success(self, mock_get_metadata, mock_show_metadata):
-        """Test successful show cover fetch."""
-        mock_get_metadata.return_value = mock_show_metadata
-
-        result = get_show_cover(
-            "11111",
-            plex_url="http://localhost:32400",
-            plex_token="test-plex-token",
-            tautulli_url="http://localhost:8181",
-            tautulli_apikey="test-api-key",
-        )
-
-        assert result is not None
-        assert "thumb" in result or "art" in result
-
-    @patch("new_seasons_reminder.api.get_metadata")
-    def test_get_show_cover_no_metadata(self, mock_get_metadata):
-        """Test show cover when metadata fetch fails."""
-        mock_get_metadata.return_value = None
-
-        result = get_show_cover(
-            "11111",
-            plex_url="http://localhost:32400",
-            plex_token="test-plex-token",
-            tautulli_url="http://localhost:8181",
-            tautulli_apikey="test-api-key",
-        )
-
-        assert result is None
-
-    @patch("new_seasons_reminder.api.get_metadata")
-    def test_get_show_cover_no_thumb(self, mock_get_metadata):
-        """Test show cover when no thumb available."""
-        mock_get_metadata.return_value = {
-            "title": "Show Name",
-            # No thumb, art, or poster_thumb
-        }
-
-        result = get_show_cover(
-            "11111",
-            plex_url="http://localhost:32400",
-            plex_token="test-plex-token",
-            tautulli_url="http://localhost:8181",
-            tautulli_apikey="test-api-key",
-        )
-
-        assert result is None
-
-    @patch("new_seasons_reminder.api.get_metadata")
-    def test_get_show_cover_fallback_to_art(self, mock_get_metadata):
-        """Test show cover falls back to art when no thumb."""
-        mock_get_metadata.return_value = {
-            "title": "Show Name",
-            "art": "/library/metadata/123/art/1234567890",
-        }
-
-        result = get_show_cover(
-            "11111",
-            plex_url="http://localhost:32400",
-            plex_token="test-plex-token",
-            tautulli_url="http://localhost:8181",
-            tautulli_apikey="test-api-key",
-        )
-
-        assert result is not None
-        assert "art" in result
-
-    @patch("new_seasons_reminder.api.get_metadata")
-    def test_get_show_cover_fallback_to_poster_thumb(self, mock_get_metadata):
-        """Test show cover falls back to poster_thumb when no thumb or art."""
-        mock_get_metadata.return_value = {
-            "title": "Show Name",
-            "poster_thumb": "/library/metadata/123/thumb/1234567890",
-        }
-
-        result = get_show_cover(
-            "11111",
-            plex_url="http://localhost:32400",
-            plex_token="test-plex-token",
-            tautulli_url="http://localhost:8181",
-            tautulli_apikey="test-api-key",
-        )
-
-        assert result is not None

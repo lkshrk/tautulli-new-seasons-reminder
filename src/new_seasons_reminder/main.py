@@ -4,20 +4,20 @@ import json
 import logging
 import sys
 import time
-from functools import partial
+from datetime import UTC, datetime, timedelta
 from typing import Any
+from urllib.error import HTTPError, URLError
 
-from .api import (
-    get_children_metadata,
-    get_metadata,
-    get_recently_added,
-    get_show_cover,
-)
 from .config import Config, setup_logging
-from .logic import get_new_finished_seasons, is_new_show
+from .http import HTTPClient
+from .logic import get_completed_seasons
+from .metadata.resolver import MetadataResolver
 from .providers import GenericProvider, SignalCliProvider, WebhookProvider
 
 logger = logging.getLogger(__name__)
+
+# Shared HTTP client for webhooks
+_http_client = HTTPClient()
 
 
 def get_webhook_provider(config: Config) -> WebhookProvider:
@@ -76,38 +76,32 @@ def send_webhook(seasons: list[dict[str, Any]], provider: WebhookProvider, confi
         payload = provider.build_payload(seasons)
         headers = provider.get_headers()
 
-        import urllib.request
-
         logger.info(
             "Sending webhook to %s with %d season(s)",
             config.webhook_url,
             len(seasons),
         )
-        data = json.dumps(payload).encode("utf-8")
-        logger.debug("Webhook payload size: %d bytes", len(data))
-        request = urllib.request.Request(
-            config.webhook_url, data=data, headers=headers, method="POST"
+        logger.debug("Webhook payload: %s", payload)
+        _http_client.post_json(config.webhook_url, data=payload, headers=headers)
+        logger.info(
+            "Webhook sent successfully to %s",
+            config.webhook_url,
         )
+        return True
 
-        with urllib.request.urlopen(request, timeout=30) as response:
-            if response.status in (200, 201, 202, 204):
-                logger.info(
-                    "Webhook sent successfully to %s (status=%s)",
-                    config.webhook_url,
-                    response.status,
-                )
-                return True
-            else:
-                logger.info(
-                    "Webhook request failed to %s (status=%s)",
-                    config.webhook_url,
-                    response.status,
-                )
-                logger.warning("Webhook returned status %s", response.status)
-                return False
-
+    except HTTPError as e:
+        logger.error(
+            "HTTP error sending webhook to %s: %s - %s",
+            config.webhook_url,
+            e.code,
+            e.reason,
+        )
+        return False
+    except URLError as e:
+        logger.error("URL error sending webhook to %s: %s", config.webhook_url, e.reason)
+        return False
     except Exception as e:
-        logger.error(f"Failed to send webhook: {e}")
+        logger.error("Failed to send webhook: %s", e)
         return False
 
 
@@ -125,6 +119,9 @@ def main() -> int:
 
     setup_logging(config.debug)
 
+    global _http_client
+    _http_client = config.create_http_client()
+
     def _mask_value(value: str, prefix: int = 4) -> str:
         if not value:
             return ""
@@ -136,8 +133,6 @@ def main() -> int:
         {
             "tautulli_url": config.tautulli_url,
             "tautulli_apikey": _mask_value(config.tautulli_apikey),
-            "plex_url": config.plex_url,
-            "plex_token_set": bool(config.plex_token),
             "webhook_url": config.webhook_url,
             "webhook_mode": config.webhook_mode,
             "webhook_message_template": config.webhook_message_template,
@@ -146,17 +141,11 @@ def main() -> int:
             "signal_number": config.signal_number,
             "signal_recipients": config.signal_recipients,
             "signal_text_mode": config.signal_text_mode,
-            "signal_include_covers": config.signal_include_covers,
             "lookback_days": config.lookback_days,
             "debug": config.debug,
+            "disable_ssl_verify": config.disable_ssl_verify,
         },
     )
-
-    if not config.tautulli_url or not config.tautulli_apikey:
-        logger.error("TAUTULLI_URL and TAUTULLI_APIKEY must be set")
-        logger.info("Exiting with code 1 (missing Tautulli configuration)")
-        return 1
-
     try:
         provider = get_webhook_provider(config)
     except ValueError as e:
@@ -165,43 +154,23 @@ def main() -> int:
         return 1
 
     try:
-        logger.debug("Creating API helper partial functions")
-        get_recently_added_func = partial(
-            get_recently_added,
-            tautulli_url=config.tautulli_url,
-            tautulli_apikey=config.tautulli_apikey,
-        )
-
-        get_metadata_func = partial(
-            get_metadata,
-            tautulli_url=config.tautulli_url,
-            tautulli_apikey=config.tautulli_apikey,
-        )
-
-        get_children_func = partial(
-            get_children_metadata,
-            tautulli_url=config.tautulli_url,
-            tautulli_apikey=config.tautulli_apikey,
-        )
-
-        get_show_cover_func = partial(
-            get_show_cover,
-            plex_url=config.plex_url,
-            plex_token=config.plex_token,
-            tautulli_url=config.tautulli_url,
-            tautulli_apikey=config.tautulli_apikey,
-        )
-
-        is_new_show_func = partial(is_new_show, get_metadata_func=get_metadata_func)
-
         logger.info("Starting season detection...")
         start_time = time.monotonic()
-        seasons = get_new_finished_seasons(
-            lookback_days=config.lookback_days,
-            get_recently_added_func=get_recently_added_func,
-            is_new_show_func=is_new_show_func,
-            get_show_cover_func=get_show_cover_func,
-            get_children_func=get_children_func,
+        source = config.create_media_source()
+        providers = config.create_metadata_providers()
+        metadata_provider = None
+        if providers:
+            metadata_provider = MetadataResolver(
+                primary=providers[0],
+                fallback=providers[1] if len(providers) > 1 else None,
+            )
+
+        since = datetime.now(tz=UTC) - timedelta(days=config.lookback_days)
+        seasons = get_completed_seasons(
+            source=source,
+            metadata_provider=metadata_provider,
+            since=since,
+            require_fully_aired=config.require_fully_aired,
             include_new_shows=config.include_new_shows,
         )
         elapsed = time.monotonic() - start_time
@@ -210,7 +179,6 @@ def main() -> int:
             len(seasons),
             elapsed,
         )
-
         logger.info(f"Found {len(seasons)} new finished season(s)")
         for season in seasons:
             logger.info(

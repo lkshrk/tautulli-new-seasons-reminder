@@ -1,228 +1,284 @@
+"""Core logic for season completion detection."""
+
+from __future__ import annotations
+
 import logging
-from collections.abc import Callable
-from datetime import UTC, datetime, timedelta
+from collections.abc import Mapping
+from datetime import datetime
 from typing import Any
+
+from new_seasons_reminder.metadata.base import ExternalMetadataProvider
+from new_seasons_reminder.models import CompletionDecision
+from new_seasons_reminder.sources.base import MediaSource
 
 logger = logging.getLogger(__name__)
 
 
 def is_new_show(
-    show_rating_key: str,
+    series_id: str,
+    show_added_at: datetime | None,
     cutoff_date: datetime,
-    get_metadata_func: Callable[[str], dict | None],
 ) -> bool | None:
     """Check if a show was recently added (i.e. is "new").
 
-    Returns True if new, False if existing, None if metadata lookup failed.
+    Args:
+        series_id: Source-native series ID
+        show_added_at: Datetime when show was first added to library
+        cutoff_date: Cutoff date to consider shows as "new"
+
+    Returns:
+        True if new, False if existing, None if timestamp unavailable
     """
-    logger.debug("Checking if show %s is new", show_rating_key)
-    show_metadata = get_metadata_func(show_rating_key)
-    if not show_metadata:
-        logger.warning("Could not get metadata for show %s", show_rating_key)
+    if not show_added_at:
+        logger.debug("Show %s missing added_at timestamp", series_id)
         return None
 
-    show_added_at = show_metadata.get("added_at")
-    if not show_added_at:
-        logger.debug("Show %s missing added_at timestamp", show_rating_key)
-        return None
+    logger.debug(
+        "Show %s added at %s compared to cutoff %s",
+        series_id,
+        show_added_at,
+        cutoff_date,
+    )
 
     try:
-        show_date = datetime.fromtimestamp(int(show_added_at), tz=UTC)
+        show_date = show_added_at
         logger.debug(
-            "Show %s added at %s compared to cutoff %s",
-            show_rating_key,
+            "Show %s added at %s - this is a %sSHOW",
+            series_id,
             show_date,
-            cutoff_date,
+            "NEW" if show_date >= cutoff_date else "EXISTING",
         )
-        if show_date >= cutoff_date:
-            logger.debug("Show added at %s - this is a NEW SHOW", show_date)
-            return True
-        logger.debug("Show added at %s - existing show", show_date)
+        return show_date >= cutoff_date
     except (ValueError, TypeError) as e:
-        logger.warning("Error parsing added_at for show %s: %s", show_rating_key, e)
+        logger.warning(
+            "Error parsing added_at for show %s: %s",
+            series_id,
+            e,
+        )
         return None
 
-    return False
 
-
-def is_season_finished(
-    season_rating_key: str,
-    get_children_func: Callable[[str], list[dict]],
-) -> bool:
-    logger.debug(f"Checking if season {season_rating_key} is finished")
-    episodes = get_children_func(season_rating_key)
-    logger.debug(f"Season {season_rating_key} children returned: {len(episodes)}")
-    if not episodes:
-        logger.debug(f"Season {season_rating_key} has no children")
-        return False
-
-    total_children = len(episodes)
-    episode_children = [ep for ep in episodes if ep.get("media_type") == "episode"]
-    available_episodes = sum(1 for ep in episode_children if ep.get("rating_key"))
-    non_episode_children = total_children - len(episode_children)
-
-    logger.debug(
-        "Season %s children breakdown: %s total, %s episodes, %s non-episodes",
-        season_rating_key,
-        total_children,
-        len(episode_children),
-        non_episode_children,
-    )
-    logger.debug(
-        "Season %s: %s/%s episodes available",
-        season_rating_key,
-        available_episodes,
-        len(episode_children),
-    )
-    return available_episodes > 0
-
-
-def get_new_finished_seasons(
-    lookback_days: int,
-    get_recently_added_func: Callable[[str, int], list[dict]],
-    is_new_show_func: Callable[[str, datetime], bool | None],
-    get_show_cover_func: Callable[[str], str | None],
-    get_children_func: Callable[[str], list[dict]],
+def get_completed_seasons(
+    source: MediaSource,
+    metadata_provider: ExternalMetadataProvider | None,
+    since: datetime,
+    require_fully_aired: bool = False,
     include_new_shows: bool = False,
 ) -> list[dict[str, Any]]:
-    cutoff_date = datetime.now(tz=UTC) - timedelta(days=lookback_days)
-    logger.info("Looking for seasons added in last %s days since %s", lookback_days, cutoff_date)
-    logger.info("Include new shows: %s", include_new_shows)
+    """Get seasons that are completed with strict episode count validation.
 
-    recently_added = get_recently_added_func("show", 100)
-    logger.debug("Recently added raw items count: %s", len(recently_added))
-    if not recently_added:
-        logger.info("No recently added items found")
+    This function:
+    1. Gets candidate seasons from the media source
+    2. Validates each season against external metadata for expected episode count
+    3. Optionally checks if all episodes have aired (if require_fully_aired=True)
+    4. Optionally filters out new shows (if include_new_shows=False)
+
+    Args:
+        source: Media source adapter (Tautulli or Jellyfin)
+        metadata_provider: External metadata provider (TMDB or TVDB)
+        since: Only consider seasons completed at or after this datetime
+        require_fully_aired: If True, only include seasons where all episodes have aired
+        include_new_shows: If False (default), skip shows first added within the since window
+
+    Returns:
+        List of completed seasons with completion details
+    """
+    logger.debug(
+        "Getting completed seasons from %s since %s",
+        source.__class__.__name__,
+        since,
+    )
+    logger.debug("Require fully aired: %s", require_fully_aired)
+
+    # Get candidate seasons from media source
+    candidates = source.get_candidate_seasons(since)
+
+    if not candidates:
+        logger.info("No candidate seasons found")
         return []
 
-    # Phase 1: Discover unique shows with recent activity
-    discovered_shows: dict[str, str] = {}
-    for item in recently_added:
-        mt = item.get("media_type")
-        show_key: str | None = None
-        show_name = "Unknown"
-        if mt == "show":
-            show_key = item.get("rating_key")
-            show_name = item.get("title", "Unknown")
-        elif mt == "season":
-            show_key = item.get("parent_rating_key")
-            show_name = item.get("parent_title", "Unknown")
-        elif mt == "episode":
-            show_key = item.get("grandparent_rating_key")
-            show_name = item.get("grandparent_title", "Unknown")
-        if show_key and show_key not in discovered_shows:
-            discovered_shows[show_key] = show_name
-            logger.debug("Discovered show: %s (key=%s) from %s item", show_name, show_key, mt)
-    logger.info("Discovered %d unique show(s) with recent activity", len(discovered_shows))
+    completed_seasons: list[dict[str, Any]] = []
 
-    # Phase 2: Enumerate ALL seasons per show, filter and collect
-    new_seasons = []
-    is_new_cache: dict[str, bool] = {}
-    episode_cache: dict[str, int] = {}
+    for candidate in candidates:
+        season_ref = candidate.season_ref
+        season_key = season_ref.season_key
+        series_id = season_key.series_id
+        season_number = season_key.season_number
 
-    for show_key, show_name in discovered_shows.items():
-        logger.debug("Enumerating seasons for show: %s (key=%s)", show_name, show_key)
-        all_children = get_children_func(str(show_key))
-        season_items = [s for s in all_children if s.get("media_type") == "season"]
-        logger.debug("Show %s has %d season(s)", show_name, len(season_items))
+        logger.debug(
+            "Processing %s (S%s) with %d episodes, completed at %s",
+            season_ref.series_name,
+            season_number,
+            candidate.in_library_episode_count,
+            candidate.completed_at,
+        )
 
-        if not season_items:
-            continue
+        # Get external provider IDs for this show
+        provider_ids = source.get_provider_ids(series_id)
 
-        # is_new_show check (once per show)
-        if show_key not in is_new_cache:
-            is_new = is_new_show_func(str(show_key), cutoff_date)
-            if is_new is None:
-                logger.warning(
-                    "Could not determine if %s (show_key=%s) is new — assuming existing show",
-                    show_name,
-                    show_key,
-                )
-                is_new = False
-            is_new_cache[show_key] = is_new
+        # Validate with external metadata
+        decision = validate_season_completion(
+            provider_ids=provider_ids.to_dict() if provider_ids else {},
+            season_number=season_number,
+            in_library_count=candidate.in_library_episode_count,
+            source_complete=candidate.is_complete_in_source,
+            metadata_provider=metadata_provider,
+            require_fully_aired=require_fully_aired,
+        )
 
-        if is_new_cache[show_key]:
+        if decision.is_complete:
+            # Optionally filter out new shows (first added within the since window)
             if not include_new_shows:
-                logger.info("Skipping %s - this is a NEW SHOW, not a new season", show_name)
-                continue
-
-            # Check ALL seasons have episodes before including any
-            all_complete = True
-            for s in season_items:
-                s_key = s.get("rating_key")
-                if not s_key:
-                    continue
-                if s_key not in episode_cache:
-                    eps = get_children_func(str(s_key))
-                    episode_cache[s_key] = len([e for e in eps if e.get("media_type") == "episode"])
-                if episode_cache[s_key] == 0:
-                    all_complete = False
-                    logger.info(
-                        "Skipping new show %s - %s has no episodes",
-                        show_name,
-                        s.get("title", s_key),
+                show_added_at = source.get_show_added_at(series_id)
+                if is_new_show(series_id, show_added_at, since) is True:
+                    logger.debug(
+                        "Skipping new show: %s (S%s)",
+                        season_ref.series_name,
+                        season_number,
                     )
-                    break
+                    continue
 
-            if not all_complete:
-                continue
+            season_dict: dict[str, Any] = {
+                "show": season_ref.series_name,
+                "season": season_number,
+                "season_title": season_ref.season_title,
+                "added_at": candidate.completed_at.isoformat(),
+                "episode_count": candidate.in_library_episode_count,
+                "rating_key": season_ref.season_id,
+                "reason": decision.reason,
+                "expected_count": decision.expected_episode_count,
+            }
+            completed_seasons.append(season_dict)
+
             logger.info(
-                "Including new show %s - all %d seasons have episodes", show_name, len(season_items)
+                "Completed: %s (S%s) - %s",
+                season_ref.series_name,
+                season_number,
+                decision.reason,
+            )
+        else:
+            logger.debug(
+                "Not complete: %s (S%s) - %s",
+                season_ref.series_name,
+                season_number,
+                decision.reason,
             )
 
-        # Process individual seasons
-        for season in season_items:
-            rating_key = season.get("rating_key")
-            title = season.get("title", "Unknown")
-            season_index = season.get("media_index", 0)
-            added_at_ts = season.get("added_at")
+    logger.info("Found %d completed seasons", len(completed_seasons))
+    return completed_seasons
 
-            if not added_at_ts:
-                logger.debug("Skipping %s %s - no added_at timestamp", show_name, title)
-                continue
 
-            try:
-                added_at = datetime.fromtimestamp(int(added_at_ts), tz=UTC)
-            except (ValueError, TypeError) as e:
-                logger.warning("Error parsing added_at for %s %s: %s", show_name, title, e)
-                continue
+def validate_season_completion(
+    provider_ids: Mapping[str, str],
+    season_number: int,
+    in_library_count: int,
+    source_complete: bool | None,
+    metadata_provider: ExternalMetadataProvider | None,
+    require_fully_aired: bool,
+) -> CompletionDecision:
+    """Validate season completion using external metadata.
 
-            if added_at < cutoff_date:
-                logger.debug(
-                    "Skipping %s %s - added at %s (before cutoff)", show_name, title, added_at
-                )
-                continue
+    This implements strict season completion detection:
+    1. If source provides is_complete_in_source (e.g., Jellyfin), use that
+    2. Otherwise, validate against external metadata:
+       a. Check if in_library_count matches expected_count
+       b. If require_fully_aired, also check airing status
 
-            logger.info("Processing: %s - %s (added %s)", show_name, title, added_at)
+    Args:
+        provider_ids: Mapping of external IDs (tmdb, tvdb, imdb)
+        season_number: Season number
+        in_library_count: Number of episodes currently in library
+        source_complete: Source-specific completeness flag (may be None for Tautulli)
+        metadata_provider: External metadata provider to query
+        require_fully_aired: Whether to check if all episodes have aired
 
-            if not rating_key:
-                logger.debug("Skipping %s %s - no rating_key", show_name, title)
-                continue
-
-            if rating_key not in episode_cache:
-                episodes = get_children_func(str(rating_key))
-                episode_cache[rating_key] = len(
-                    [ep for ep in episodes if ep.get("media_type") == "episode"]
-                )
-
-            episode_count = episode_cache[rating_key]
-            if episode_count == 0:
-                logger.info("Skipping %s %s - no episodes", show_name, title)
-                continue
-
-            cover_url = get_show_cover_func(str(show_key))
-            logger.info("Accepted season: %s %s with %d episodes", show_name, title, episode_count)
-
-            new_seasons.append(
-                {
-                    "show": show_name,
-                    "season": season_index,
-                    "season_title": title,
-                    "added_at": added_at.isoformat(),
-                    "episode_count": episode_count,
-                    "rating_key": rating_key,
-                    "cover_url": cover_url,
-                }
+    Returns:
+        CompletionDecision with completion status and reason
+    """
+    # Case 1: Source provides completion status (e.g., Jellyfin)
+    if source_complete is not None:
+        if source_complete:
+            return CompletionDecision(
+                is_complete=True,
+                reason="Source reports season as complete",
+                expected_episode_count=in_library_count,
+            )
+        else:
+            return CompletionDecision(
+                is_complete=False,
+                reason="Source reports season as incomplete",
+                expected_episode_count=in_library_count,
             )
 
-    return new_seasons
+    # Case 2: Use external metadata provider
+    if metadata_provider is None:
+        return CompletionDecision(
+            is_complete=in_library_count > 0,
+            reason="No metadata provider configured - assuming complete if episodes exist",
+            expected_episode_count=None,
+        )
+
+    # Get expected episode count from metadata provider
+    expected_count = metadata_provider.get_expected_episode_count(
+        provider_ids=provider_ids,
+        season_number=season_number,
+    )
+
+    if expected_count is None:
+        logger.debug(
+            "No expected episode count from metadata provider for S%s",
+            season_number,
+        )
+        return CompletionDecision(
+            is_complete=in_library_count > 0,
+            reason="Could not determine expected episode count",
+            expected_episode_count=None,
+        )
+
+    logger.debug(
+        "Season S%s: library=%d, expected=%d",
+        season_number,
+        in_library_count,
+        expected_count,
+    )
+
+    # Check if counts match
+    counts_match = in_library_count == expected_count
+
+    if not counts_match:
+        return CompletionDecision(
+            is_complete=False,
+            reason=f"Incomplete: {in_library_count}/{expected_count} episodes in library",
+            expected_episode_count=expected_count,
+        )
+
+    # Check airing status if required
+    if require_fully_aired:
+        is_fully_aired = metadata_provider.is_season_fully_aired(
+            provider_ids=provider_ids,
+            season_number=season_number,
+        )
+
+        if is_fully_aired is None:
+            logger.debug("Could not determine airing status")
+            # If we can't determine airing status, assume it's complete
+            return CompletionDecision(
+                is_complete=True,
+                reason=(
+                    f"Complete: {in_library_count}/{expected_count} episodes (airs status unknown)"
+                ),
+                expected_episode_count=expected_count,
+            )
+        elif not is_fully_aired:
+            return CompletionDecision(
+                is_complete=False,
+                reason="Incomplete: Not all episodes have aired yet",
+                expected_episode_count=expected_count,
+            )
+
+    # Counts match and (no airing check or all aired)
+    return CompletionDecision(
+        is_complete=True,
+        reason=f"Complete: {in_library_count}/{expected_count} episodes in library",
+        expected_episode_count=expected_count,
+    )
