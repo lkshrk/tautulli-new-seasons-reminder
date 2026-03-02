@@ -81,6 +81,8 @@ class SonarrMediaSource(MediaSource):
         # Batch fetch episodes per series to avoid N+1 API calls
         for series in series_list:
             series_id = series.get("id")
+            if not isinstance(series_id, int):
+                continue
             series_title = series.get("title", "Unknown")
             seasons = series.get("seasons", [])
 
@@ -345,7 +347,7 @@ class SonarrMediaSource(MediaSource):
         """
         url = f"{self.sonarr_url}/api/v3/episode"
         params = {
-            "seriesId": series_id,
+            "seriesId": str(series_id),
             "includeEpisodeFile": "true",
         }
 

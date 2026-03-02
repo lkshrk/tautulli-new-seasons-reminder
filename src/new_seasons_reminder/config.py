@@ -5,9 +5,12 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from new_seasons_reminder.http import HTTPClient
+
+if TYPE_CHECKING:
+    from new_seasons_reminder.sources.sonarr import SonarrMediaSource
 
 logger = logging.getLogger(__name__)
 
@@ -142,7 +145,7 @@ class Config:
             "signal_text_mode": self.signal_text_mode,
         }
 
-    def create_media_source(self):
+    def create_media_source(self) -> SonarrMediaSource:
         """Create Sonarr media source instance."""
         from new_seasons_reminder.sources.sonarr import SonarrMediaSource
 
