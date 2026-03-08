@@ -91,10 +91,10 @@ class TestSignalCliProvider:
         payload = provider.build_payload(sample_seasons)
         assert sorted(payload.keys()) == [
             "message",
+            "number",
             "recipients",
-            "sender",
         ]
-        assert payload["sender"] == "+1234567890"
+        assert payload["number"] == "+1234567890"
         assert payload["recipients"] == ["+0987654321", "+1122334455"]
         assert payload["message"]
 
@@ -107,10 +107,10 @@ class TestSignalCliProvider:
         payload = provider.build_payload(sample_seasons)
         assert sorted(payload.keys()) == [
             "message",
+            "number",
             "recipients",
-            "sender",
         ]
-        assert payload["sender"] == "+1234567890"
+        assert payload["number"] == "+1234567890"
         assert payload["recipients"] == ["+0987654321", "+1122334455"]
         assert payload["message"]
 
