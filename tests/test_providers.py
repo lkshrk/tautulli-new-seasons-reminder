@@ -91,11 +91,11 @@ class TestSignalCliProvider:
         payload = provider.build_payload(sample_seasons)
         assert sorted(payload.keys()) == [
             "message",
-            "recipient",
+            "recipients",
             "sender",
         ]
         assert payload["sender"] == "+1234567890"
-        assert payload["recipient"] == "+0987654321"
+        assert payload["recipients"] == "+0987654321"
         assert payload["message"]
 
     def test_build_payload_seerr_notification_shape(self, signal_config, sample_seasons):
@@ -107,11 +107,11 @@ class TestSignalCliProvider:
         payload = provider.build_payload(sample_seasons)
         assert sorted(payload.keys()) == [
             "message",
-            "recipient",
+            "recipients",
             "sender",
         ]
         assert payload["sender"] == "+1234567890"
-        assert payload["recipient"] == "+0987654321"
+        assert payload["recipients"] == "+0987654321"
         assert payload["message"]
 
 
