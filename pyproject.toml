@@ -1,10 +1,10 @@
 [build-system]
-requires = ["hatchling", "hatch-vcs"]
+requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
 name = "tautulli-new-seasons-reminder"
-dynamic = ["version"]
+version = "1.4.0"
 description = "Tautulli custom script for weekly new season reminders via webhooks"
 requires-python = ">=3.14"
 license = "MIT"
@@ -129,5 +129,18 @@ convention = "google"
 [tool.hatch.build.targets.wheel]
 packages = ["src/new_seasons_reminder"]
 
-[tool.hatch.version]
-source = "vcs"
+[tool.semantic_release]
+version_toml = ["pyproject.toml:project.version"]
+tag_format = "v{version}"
+commit_message = "chore(release): {version}"
+build_command = ""
+major_on_zero = false
+commit_parser = "conventional"
+
+[tool.semantic_release.commit_parser_options]
+allowed_tags = ["build", "chore", "ci", "docs", "feat", "fix", "perf", "refactor", "style", "test"]
+minor_tags = ["feat"]
+patch_tags = ["fix", "perf"]
+
+[tool.semantic_release.remote]
+type = "github"

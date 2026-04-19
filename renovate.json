@@ -2,6 +2,8 @@
 	"$schema": "https://docs.renovatebot.com/renovate-schema.json",
 	"extends": ["config:recommended", ":dependencyDashboard", "schedule:earlyMondays"],
 	"rangeStrategy": "replace",
+	"semanticCommitType": "fix",
+	"semanticCommitScope": "deps",
 	"automerge": true,
 	"automergeType": "pr",
 	"automergeStrategy": "squash",
