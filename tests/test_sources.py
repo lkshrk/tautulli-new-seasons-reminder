@@ -262,6 +262,31 @@ class TestSonarrGetCandidateSeasons:
         candidates = list(source.get_candidate_seasons(since))
         assert candidates == []
 
+    def test_skips_still_airing_season(self):
+        """Season with all aired episodes downloaded but still airing should be skipped."""
+        since = _now() - timedelta(days=7)
+
+        series = [
+            _sonarr_series_item(
+                series_id=1,
+                title="Still Airing",
+                seasons=[
+                    _sonarr_season_stats(
+                        season_number=1,
+                        episode_file_count=5,
+                        episode_count=5,  # 5 aired, all downloaded
+                        total_episode_count=10,  # but 10 total planned
+                    )
+                ],
+            )
+        ]
+
+        http = _make_http(return_value=series)
+        source = self._source(http)
+
+        candidates = list(source.get_candidate_seasons(since))
+        assert candidates == []
+
     def test_handles_multiple_series_and_seasons(self):
         since = _now() - timedelta(days=7)
         recent_ts = _recent_ts(1)
@@ -279,7 +304,7 @@ class TestSonarrGetCandidateSeasons:
                 series_id=2,
                 title="Show B",
                 seasons=[
-                    _sonarr_season_stats(1, 8, 8),  # Complete
+                    _sonarr_season_stats(1, 8, 8, total_episode_count=8),  # Complete
                 ],
             ),
         ]

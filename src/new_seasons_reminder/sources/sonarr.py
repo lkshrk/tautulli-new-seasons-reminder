@@ -105,12 +105,25 @@ class SonarrMediaSource(MediaSource):
                     logger.debug("Skipping special season for %s", series_title)
                     continue
 
+                total_episode_count = statistics.get("totalEpisodeCount", 0)
+
                 # Check if season is complete (all aired episodes have files)
                 if episode_count == 0:
                     logger.debug(
                         "Season %s S%d has no aired episodes, skipping",
                         series_title,
                         season_number,
+                    )
+                    continue
+
+                # Check if season has finished airing (no unaired episodes)
+                if episode_count < total_episode_count:
+                    logger.debug(
+                        "Season %s S%d still airing: %d/%d episodes aired",
+                        series_title,
+                        season_number,
+                        episode_count,
+                        total_episode_count,
                     )
                     continue
 
