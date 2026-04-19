@@ -103,7 +103,7 @@ class HTTPClient:
                     e,
                 )
                 time.sleep(delay)
-        raise last_error  # pragma: no cover
+        raise last_error if last_error else RuntimeError("unreachable")  # pragma: no cover
 
     def _safe_log_url(self, url: str) -> str:
         """Safely log URL with sensitive data redacted.
