@@ -52,9 +52,7 @@ def load_templates(file_path: str) -> list[str]:
     templates = [str(item) for item in data if isinstance(item, str) and item.strip()]
     if len(templates) < len(data):
         skipped = len(data) - len(templates)
-        logger.warning(
-            "Skipped %d non-string or empty entries in %s", skipped, file_path
-        )
+        logger.warning("Skipped %d non-string or empty entries in %s", skipped, file_path)
 
     logger.info("Loaded %d message template(s) from %s", len(templates), file_path)
     return templates

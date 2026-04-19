@@ -181,10 +181,7 @@ class TestFormatShowList:
             {"show": "The Office", "season": 2},
             {"show": "Breaking Bad", "season": 1},
         ]
-        assert (
-            nsr.WebhookProvider.format_show_list(seasons)
-            == "Breaking Bad S1, The Office S2"
-        )
+        assert nsr.WebhookProvider.format_show_list(seasons) == "Breaking Bad S1, The Office S2"
 
     def test_multiple_shows_with_grouped_seasons(self):
         seasons = [
@@ -193,8 +190,7 @@ class TestFormatShowList:
             {"show": "Breaking Bad", "season": 1},
         ]
         assert (
-            nsr.WebhookProvider.format_show_list(seasons)
-            == "Breaking Bad S1, The Office S2 & S3"
+            nsr.WebhookProvider.format_show_list(seasons) == "Breaking Bad S1, The Office S2 & S3"
         )
 
     def test_case_insensitive_sort(self):
@@ -224,9 +220,6 @@ class TestSignalCliThreeSeasons:
 
     def test_format_message_four_seasons_same_show(self, signal_config):
         provider = nsr.SignalCliProvider(signal_config)
-        seasons = [
-            {"show": "Friends", "season": s, "episode_count": 24}
-            for s in [4, 1, 3, 2]
-        ]
+        seasons = [{"show": "Friends", "season": s, "episode_count": 24} for s in [4, 1, 3, 2]]
         message = provider.format_message(seasons)
         assert "S1, S2, S3 & S4" in message
